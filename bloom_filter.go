@@ -1,11 +1,8 @@
 package MerkleTree
 
 import (
-	"bytes"
 	"encoding/binary"
-	"encoding/json"
 	"fmt"
-	"io"
 	"math"
 
 	"github.com/spaolacci/murmur3"
@@ -67,8 +64,6 @@ func (f *BloomFilter) location(h [4]uint64, i uint) uint {
 }
 
 // EstimateParameters estimates requirements for m and k.
-// Based on https://bitbucket.org/ww/bloom/src/829aa19d01d9/bloom.go
-// used with permission.
 func EstimateParameters(n uint, p float64) (m uint, k uint) {
 	m = uint(math.Ceil(-1 * float64(n) * math.Log(p) / math.Pow(math.Log(2), 2)))
 	k = uint(math.Ceil(math.Log(2) * float64(m) / float64(n)))
@@ -210,89 +205,6 @@ func (f *BloomFilter) EstimateFalsePositiveRate(n uint) (fpRate float64) {
 	fpRate = float64(fp) / (float64(rounds))
 	f.ClearAll()
 	return
-}
-
-// bloomFilterJSON is an unexported type for marshaling/unmarshaling BloomFilter struct.
-type bloomFilterJSON struct {
-	M uint           `json:"m"`
-	K uint           `json:"k"`
-	B *bitset.BitSet `json:"b"`
-}
-
-// MarshalJSON implements json.Marshaler interface.
-func (f *BloomFilter) MarshalJSON() ([]byte, error) {
-	return json.Marshal(bloomFilterJSON{f.m, f.k, f.b})
-}
-
-// UnmarshalJSON implements json.Unmarshaler interface.
-func (f *BloomFilter) UnmarshalJSON(data []byte) error {
-	var j bloomFilterJSON
-	err := json.Unmarshal(data, &j)
-	if err != nil {
-		return err
-	}
-	f.m = j.M
-	f.k = j.K
-	f.b = j.B
-	return nil
-}
-
-// WriteTo writes a binary representation of the BloomFilter to an i/o stream.
-// It returns the number of bytes written.
-func (f *BloomFilter) WriteTo(stream io.Writer) (int64, error) {
-	err := binary.Write(stream, binary.BigEndian, uint64(f.m))
-	if err != nil {
-		return 0, err
-	}
-	err = binary.Write(stream, binary.BigEndian, uint64(f.k))
-	if err != nil {
-		return 0, err
-	}
-	numBytes, err := f.b.WriteTo(stream)
-	return numBytes + int64(2*binary.Size(uint64(0))), err
-}
-
-// ReadFrom reads a binary representation of the BloomFilter (such as might
-// have been written by WriteTo()) from an i/o stream. It returns the number
-// of bytes read.
-func (f *BloomFilter) ReadFrom(stream io.Reader) (int64, error) {
-	var m, k uint64
-	err := binary.Read(stream, binary.BigEndian, &m)
-	if err != nil {
-		return 0, err
-	}
-	err = binary.Read(stream, binary.BigEndian, &k)
-	if err != nil {
-		return 0, err
-	}
-	b := &bitset.BitSet{}
-	numBytes, err := b.ReadFrom(stream)
-	if err != nil {
-		return 0, err
-	}
-	f.m = uint(m)
-	f.k = uint(k)
-	f.b = b
-	return numBytes + int64(2*binary.Size(uint64(0))), nil
-}
-
-// GobEncode implements gob.GobEncoder interface.
-func (f *BloomFilter) GobEncode() ([]byte, error) {
-	var buf bytes.Buffer
-	_, err := f.WriteTo(&buf)
-	if err != nil {
-		return nil, err
-	}
-
-	return buf.Bytes(), nil
-}
-
-// GobDecode implements gob.GobDecoder interface.
-func (f *BloomFilter) GobDecode(data []byte) error {
-	buf := bytes.NewBuffer(data)
-	_, err := f.ReadFrom(buf)
-
-	return err
 }
 
 // Equal tests for the equality of two Bloom filters

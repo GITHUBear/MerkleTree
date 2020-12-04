@@ -369,6 +369,18 @@ func TestNewTreeWithHashingStrategy(t *testing.T) {
 	}
 }
 
+func TestNewTreeWithHashingStrategyAndBloomFilter(t *testing.T) {
+	for i := 0; i < len(table); i++ {
+		tree, err := NewTreeWithHashPolicyAndBloomFilter(table[i].contents, table[i].hashStrategy, 0.01)
+		if err != nil {
+			t.Errorf("[case:%d] error: unexpected error: %v", table[i].testCaseId, err)
+		}
+		if bytes.Compare(tree.MerkleRoot(), table[i].expectedHash) != 0 {
+			t.Errorf("[case:%d] error: expected hash equal to %v got %v", table[i].testCaseId, table[i].expectedHash, tree.MerkleRoot())
+		}
+	}
+}
+
 func TestMerkleTree_MerkleRoot(t *testing.T) {
 	for i := 0; i < len(table); i++ {
 		var tree *MerkleTree
@@ -377,6 +389,24 @@ func TestMerkleTree_MerkleRoot(t *testing.T) {
 			tree, err = NewTree(table[i].contents)
 		} else {
 			tree, err = NewTreeWithHashPolicy(table[i].contents, table[i].hashStrategy)
+		}
+		if err != nil {
+			t.Errorf("[case:%d] error: unexpected error: %v", table[i].testCaseId, err)
+		}
+		if bytes.Compare(tree.MerkleRoot(), table[i].expectedHash) != 0 {
+			t.Errorf("[case:%d] error: expected hash equal to %v got %v", table[i].testCaseId, table[i].expectedHash, tree.MerkleRoot())
+		}
+	}
+}
+
+func TestBloomMerkleTree_MerkleRoot(t *testing.T) {
+	for i := 0; i < len(table); i++ {
+		var tree *MerkleTree
+		var err error
+		if table[i].defaultHashStrategy {
+			tree, err = NewTreeWithBloomFilter(table[i].contents, 0.01)
+		} else {
+			tree, err = NewTreeWithHashPolicyAndBloomFilter(table[i].contents, table[i].hashStrategy, 0.01)
 		}
 		if err != nil {
 			t.Errorf("[case:%d] error: unexpected error: %v", table[i].testCaseId, err)
@@ -481,6 +511,69 @@ func TestMerkleTree_VerifyContent(t *testing.T) {
 	}
 }
 
+func TestBloomMerkleTree_VerifyContent(t *testing.T) {
+	for i := 0; i < len(table); i++ {
+		var tree *MerkleTree
+		var err error
+		if table[i].defaultHashStrategy {
+			tree, err = NewTreeWithBloomFilter(table[i].contents, 0.01)
+		} else {
+			tree, err = NewTreeWithHashPolicyAndBloomFilter(table[i].contents, table[i].hashStrategy, 0.01)
+		}
+		if err != nil {
+			t.Errorf("[case:%d] error: unexpected error: %v", table[i].testCaseId, err)
+		}
+		if len(table[i].contents) > 0 {
+			v, err := tree.VerifyContent(table[i].contents[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !v {
+				t.Errorf("[case:%d] error: expected valid content", table[i].testCaseId)
+			}
+		}
+		if len(table[i].contents) > 1 {
+			v, err := tree.VerifyContent(table[i].contents[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !v {
+				t.Errorf("[case:%d] error: expected valid content", table[i].testCaseId)
+			}
+		}
+		if len(table[i].contents) > 2 {
+			v, err := tree.VerifyContent(table[i].contents[2])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !v {
+				t.Errorf("[case:%d] error: expected valid content", table[i].testCaseId)
+			}
+		}
+		if len(table[i].contents) > 0 {
+			tree.root.nodeHash = []byte{1}
+			tree.rootHash = []byte{1}
+			v, err := tree.VerifyContent(table[i].contents[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if v {
+				t.Errorf("[case:%d] error: expected invalid content", table[i].testCaseId)
+			}
+			if err := tree.RebuildTree(); err != nil {
+				t.Fatal(err)
+			}
+		}
+		v, err := tree.VerifyContent(table[i].notInContents)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v {
+			t.Errorf("[case:%d] error: expected invalid content", table[i].testCaseId)
+		}
+	}
+}
+
 func TestMerkleTree_MerklePath(t *testing.T) {
 	for i := 0; i < len(table); i++ {
 		var tree *MerkleTree
@@ -489,6 +582,47 @@ func TestMerkleTree_MerklePath(t *testing.T) {
 			tree, err = NewTree(table[i].contents)
 		} else {
 			tree, err = NewTreeWithHashPolicy(table[i].contents, table[i].hashStrategy)
+		}
+		if err != nil {
+			t.Errorf("[case:%d] error: unexpected error: %v", table[i].testCaseId, err)
+		}
+		for j := 0; j < len(table[i].contents); j++ {
+			merklePath, index, _ := tree.GetMerkleMultiProof(table[i].contents[j])
+
+			hash, err := tree.leaves[j].calculateHash()
+			if err != nil {
+				t.Errorf("[case:%d] error: calculateNodeHash error: %v", table[i].testCaseId, err)
+			}
+			h := sha256.New()
+			for k := 0; k < len(merklePath); k++ {
+				if index[k] == 1 {
+					hash = append(hash, merklePath[k]...)
+				} else {
+					hash = append(merklePath[k], hash...)
+				}
+				if _, err := h.Write(hash); err != nil {
+					t.Errorf("[case:%d] error: Write error: %v", table[i].testCaseId, err)
+				}
+				hash, err = calHash(hash, table[i].hashStrategy)
+				if err != nil {
+					t.Errorf("[case:%d] error: calHash error: %v", table[i].testCaseId, err)
+				}
+			}
+			if bytes.Compare(tree.MerkleRoot(), hash) != 0 {
+				t.Errorf("[case:%d] error: expected hash equal to %v got %v", table[i].testCaseId, hash, tree.MerkleRoot())
+			}
+		}
+	}
+}
+
+func TestBloomMerkleTree_MerklePath(t *testing.T) {
+	for i := 0; i < len(table); i++ {
+		var tree *MerkleTree
+		var err error
+		if table[i].defaultHashStrategy {
+			tree, err = NewTreeWithBloomFilter(table[i].contents, 0.01)
+		} else {
+			tree, err = NewTreeWithHashPolicyAndBloomFilter(table[i].contents, table[i].hashStrategy, 0.01)
 		}
 		if err != nil {
 			t.Errorf("[case:%d] error: unexpected error: %v", table[i].testCaseId, err)
