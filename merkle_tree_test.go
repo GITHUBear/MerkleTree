@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"crypto/md5"
 	"crypto/sha256"
+	"fmt"
 	"hash"
 	"testing"
+	"time"
 )
 
 //TestSHA256Content implements the Content interface provided by merkletree and represents the content stored in the tree.
@@ -671,5 +673,83 @@ func TestMerkleTree_String(t *testing.T) {
 		if tree.String() == "" {
 			t.Errorf("[case:%d] error: expected not empty string", table[i].testCaseId)
 		}
+	}
+}
+
+func TestMerkleTree_Vs_BloomMerkleTree_VertifyContent(t *testing.T) {
+	contents := make([]Content, 0)
+	for i := 0; i < 10000; i++ {
+		contents = append(contents, TestSHA256Content{
+			x: string(i),
+		})
+	}
+	bloom_mt_new_start := time.Now()
+	bloom_mt, err := NewTreeWithBloomFilter(contents, 0.01)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bloom_mt_new_elapsed := time.Since(bloom_mt_new_start)
+	mt_new_start := time.Now()
+	mt, err := NewTree(contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mt_new_elapsed := time.Since(mt_new_start)
+	fmt.Printf("bloom merkle tree create: %v\n", bloom_mt_new_elapsed)
+	fmt.Printf("merkle tree create: %v\n", mt_new_elapsed)
+
+	for testIdx, absentN := range []uint{0, 1000, 2000, 3000, 4000, 5000, 6000, 7000, 8000, 9000, 10000} {
+		bloom_mt_verify_start := time.Now()
+		for i := 9000; i > 0; i-- {
+			ok, err := bloom_mt.VerifyContent(TestSHA256Content{
+				x: string(i),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ok {
+				t.Error("verify content fail")
+			}
+		}
+		for i := 10000 + absentN; i > 10000; i-- {
+			ok, err := bloom_mt.VerifyContent(TestSHA256Content{
+				x: string(i),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok {
+				t.Error("verify absent content fail")
+			}
+		}
+		bloom_mt_verify_eslapsed := time.Since(bloom_mt_verify_start)
+
+		mt_verify_start := time.Now()
+		for i := 9000; i > 0; i-- {
+			ok, err := mt.VerifyContent(TestSHA256Content{
+				x: string(i),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !ok {
+				t.Error("verify content fail")
+			}
+		}
+		for i := 10000 + absentN; i > 10000; i-- {
+			ok, err := mt.VerifyContent(TestSHA256Content{
+				x: string(i),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if ok {
+				t.Error("verify absent content fail")
+			}
+		}
+		mt_verify_eslapsed := time.Since(mt_verify_start)
+		fmt.Printf("[case:%v] absent rate: %v\n", testIdx, float64(absentN) / float64(9000 + absentN))
+		fmt.Printf("bloom merkle tree verify: %v\n", bloom_mt_verify_eslapsed)
+		fmt.Printf("merkle tree verify: %v\n", mt_verify_eslapsed)
 	}
 }
